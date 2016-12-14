@@ -170,14 +170,14 @@ class SPIFlash(object):
                         print "MISO : %s" % soutput
                         break
                     if self.command != '':
-                        #print "%.4f Command : %s (%s)" % (ts, self.COMMANDS[self.command], self.command)
-                        #if len(self.args) > 0:
-                        #    print "Arguments : %s" % " ".join(self.args)
+                        print "%.4f Command : %s (%s)" % (ts, self.COMMANDS[self.command], self.command)
+                        if len(self.args) > 0:
+                            print "Arguments : %s" % " ".join(self.args)
                         if len(self.data) > 0:
-                            #data = self.data
-                            #while len(data):
-                            #    print " ".join(data[0:8])
-                            #    data = data[8:]
+                            data = self.data
+                            while len(data):
+                                print " ".join(data[0:8])
+                                data = data[8:]
                             if self.command == 'BB' or self.command == '03':
                                 offset = int(''.join(self.args[0:3]), 16)
                                 self.builder.add_data(self.data, offset)
