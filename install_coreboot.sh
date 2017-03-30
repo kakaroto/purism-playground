@@ -9,6 +9,7 @@
 
 # Dependencies : curl dmidecode flashrom sharutils
 
+ARGV=$1
 TEMPDIR=$(mktemp -d /tmp/coreboot_install.XXXXXX)
 LOGFILE="${TEMPDIR}/install.log"
 
@@ -113,21 +114,15 @@ check_machine() {
     MANUFACTURER=$(${DMIDECODE} -t 1 |grep -m1 "Manufacturer:"   | cut -d' ' -f 2-)
     PRODUCT_NAME=$(${DMIDECODE} -t 1 |grep -m1 "Product Name:"   | cut -d' ' -f 3-)
     VERSION=$(${DMIDECODE} -t 1 |grep -m1 "Version:"   | cut -d' ' -f 2-)
+    IS_LIBREM13V1=0
 
-
-    if [ "${MANUFACTURER}" == "LENOVO" -a \
-                           "${PRODUCT_NAME}" == "20AQCTO1WW" -a \
-                           "${VERSION}" == "ThinkPad T440s" ]; then
-        FLASHROM_ARGS=""
-        ORIG_FILENAME="vendor_bios_backup.rom"
-        VENDOR=1
-        log "Vendor BIOS has been detected in your flash"
-    elif [ "${MANUFACTURER}" == "Intel Corporation" -a \
+    if [ "${MANUFACTURER}" == "Intel Corporation" -a \
                              "${PRODUCT_NAME}" == "SharkBay Platform" -a \
                              "${VERSION}" == "0.1" ]; then
         FLASHROM_ARGS=""
         ORIG_FILENAME="vendor_bios_backup.rom"
         VENDOR=1
+        IS_LIBREM13V1=1
         log "Vendor BIOS has been detected in your flash"
     elif [ "${MANUFACTURER}" == "Purism" -a \
                              "${PRODUCT_NAME}" == "Librem 13" -a \
@@ -135,16 +130,37 @@ check_machine() {
         FLASHROM_ARGS="-c MX25L6406E/MX25L6408E"
         ORIG_FILENAME="coreboot_bios_backup.rom"
         VENDOR=1
+        IS_LIBREM13V1=1
         log '**** Coreboot BIOS has been detected in your flash **** '
     else
-        die '**** This machine does not seem to be a Purism Librem 13 v1, it is not safe to use this script **** '
+        if [ "$ARGV" == "--test-on-non-librem" ]; then
+            log '**** This machine does not seem to be a Purism Librem 13 v1, it is not safe to use this script **** '
+            log 'You have enabled the --test-on-non-librem option, so this script will continue but will not'
+            log 'attempt to access your flash.'
+            FLASHROM_ARGS=""
+            ORIG_FILENAME="vendor_bios_backup.rom"
+            VENDOR=1
+            IS_LIBREM13V1=0
+        else
+            die '**** This machine does not seem to be a Purism Librem 13 v1, it is not safe to use this script **** '
+        fi
     fi
 }
 
 backup_original_rom() {
     log "Making backup copy of your current BIOS"
-    if [ "${MANUFACTURER}" != "LENOVO" ]; then
+    if [ "${IS_LIBREM13V1}" == "1" ]; then
         ${FLASHROM} -V ${FLASHROM_PROGRAMMER} ${FLASHROM_ARGS} -r ${ORIG_FILENAME} >& ${TEMPDIR}/flashrom_read.log || die "Unable to dump original BIOS from your flash"
+    else
+        if ! check_file_sha1 "${ORIG_FILENAME}" "1860c3e14f700dd060d974ea2612271eaa4307da" 1 ; then
+            log 'This is not a Librem 13 machine, so a Vendor bios will be downloaded for testing purposes'
+            curl -s "http://kakaroto.homelinux.net/vendor_bios_backup.rom.bz2" > ${ORIG_FILENAME}.bz2
+            rm -f ${ORIG_FILENAME}
+            bunzip2 ${ORIG_FILENAME}.bz2
+            if ! check_file_sha1 "${ORIG_FILENAME}" "1860c3e14f700dd060d974ea2612271eaa4307da" 1 ; then
+                die "Vendor BIOS hash does not match the expected one"
+            fi
+        fi
     fi
     
     log "Your current BIOS has been backed up to the file '${ORIG_FILENAME}'"
@@ -630,7 +646,7 @@ flash_coreboot() {
     log ''
     log 'Press Enter to start the flashing process'
     read
-    if [ "${MANUFACTURER}" != "LENOVO" ]; then
+    if [ "${IS_LIBREM13V1}" == "1" ]; then
         log '**** Flashing Coreboot to your BIOS Flash ****'
         ${FLASHROM} -V ${FLASHROM_PROGRAMMER} ${FLASHROM_ARGS} -w ${COREBOOT_FINAL_IMAGE} >& ${TEMPDIR}/flashrom_write.log || flashing_failure
     fi
