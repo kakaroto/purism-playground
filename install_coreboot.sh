@@ -112,14 +112,18 @@ check_dependencies () {
 }
 
 check_machine() {
-    MANUFACTURER=$(${DMIDECODE} -t 1 |grep -m1 "Manufacturer:"   | cut -d' ' -f 2-)
-    PRODUCT_NAME=$(${DMIDECODE} -t 1 |grep -m1 "Product Name:"   | cut -d' ' -f 3-)
-    VERSION=$(${DMIDECODE} -t 1 |grep -m1 "Version:"   | cut -d' ' -f 2-)
+    local MANUFACTURER=$(${DMIDECODE} -t 1 |grep -m1 "Manufacturer:"   | cut -d' ' -f 2-)
+    local PRODUCT_NAME=$(${DMIDECODE} -t 1 |grep -m1 "Product Name:"   | cut -d' ' -f 3-)
+    local VERSION=$(${DMIDECODE} -t 1 |grep -m1 "Version:"   | cut -d' ' -f 2-)
+    local BIOS_DATE=$(${DMIDECODE} -t 0 |grep -m1 "Release Date:"   | cut -d' ' -f 3-)
+    local FAMILY=$(${DMIDECODE} -t 4 |grep -m1 "Family:"   | cut -d' ' -f 2-)
     IS_LIBREM13V1=0
 
     if [ "${MANUFACTURER}" == "Intel Corporation" -a \
                              "${PRODUCT_NAME}" == "SharkBay Platform" -a \
-                             "${VERSION}" == "0.1" ]; then
+                             "${VERSION}" == "0.1" -a \
+                             "${FAMILY}" == "Core i5" -a \
+                             "${BIOS_DATE}" == "06/18/2015" ]; then
         FLASHROM_ARGS=""
         ORIG_FILENAME="factory_bios_backup.rom"
         VENDOR=1
