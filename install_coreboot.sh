@@ -597,13 +597,6 @@ build_cbfs_image() {
 }
 
 apply_config_options() {
-    intel_me=1
-    microcode=1
-    vbios_emulator=1
-    bootorder=1
-    memtest=1
-    delay=2500
-
     log '**** Applying configuration options ****'
     if [ "$intel_me" == "1" ]; then
         log '**** Neutralizing the Intel Management Engine using me_cleaner ****'
@@ -766,6 +759,7 @@ flash_coreboot() {
 check_root
 check_dependencies
 check_machine
+check_battery
 backup_original_rom
 get_required_blobs
 default_config_options
