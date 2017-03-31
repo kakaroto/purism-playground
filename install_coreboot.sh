@@ -44,6 +44,7 @@ VGABIOS_SHA1='17db61b82e833a8df83c5dc4a0a68e35210a6334'
 DESCRIPTOR_FILENAME='flashregion_0_flashdescriptor.bin'
 DESCRIPTOR_SIZE='4096'
 DESCRIPTOR_SHA1='359101061f789e1cfc13742d5980ac441787e96c'
+DESCRIPTOR_SHA1_CB='c4c00c68a56203b311e73d13be7fbc63d2e7b5af'
 ME_FILENAME='flashregion_2_intel_me.bin'
 ME_SIZE='2093056'
 COREBOOT_FILENAME='coreboot_bios.rom'
@@ -129,7 +130,7 @@ check_machine() {
                              "${VERSION}" == "1.0" ]; then
         FLASHROM_ARGS="-c MX25L6406E/MX25L6408E"
         ORIG_FILENAME="coreboot_bios_backup.rom"
-        VENDOR=1
+        VENDOR=0
         IS_LIBREM13V1=1
         log '**** Coreboot BIOS has been detected in your flash **** '
     else
@@ -148,7 +149,7 @@ check_machine() {
 }
 
 backup_original_rom() {
-    log "Making backup copy of your current BIOS"
+    log "Making backup copy of your current BIOS. Please wait..."
     if [ "${IS_LIBREM13V1}" == "1" ]; then
         ${FLASHROM} -V ${FLASHROM_PROGRAMMER} ${FLASHROM_ARGS} -r ${ORIG_FILENAME} >& ${TEMPDIR}/flashrom_read.log || die "Unable to dump original BIOS from your flash"
     else
@@ -296,7 +297,9 @@ get_tidus_coreboot () {
 
 get_mrc_blob() {
     local coreboot_filename=""
-    if [ $VENDOR ]; then
+    local region="COREBOOT"
+
+    if [ "$VENDOR" == "1" ]; then
         log '**** The original vendor BIOS has been detected.                    ****'
         log '**** Since this is the first time you will be upgrading to coreboot ****'
         log '**** You will need to download some of the required binary blobs.   ****'
@@ -309,17 +312,18 @@ get_mrc_blob() {
 
         get_tidus_coreboot
         coreboot_filename=${TIDUS_COREBOOT_FILENAME}
+        region="BOOT_STUB"
     else
         coreboot_filename=${ORIG_FILENAME}
     fi
 
     log "Extracting Memory Reference Code : ${MRC_FILENAME}"
-    ${CBFSTOOL} $coreboot_filename extract  -r BOOT_STUB -n "mrc.bin" -f ${MRC_FILENAME} > ${TEMPDIR}/cbfstool_mrc.log 2>&1 || die "Unable to extract MRC file"
+    ${CBFSTOOL} $coreboot_filename extract  -r $region -n "mrc.bin" -f ${MRC_FILENAME} > ${TEMPDIR}/cbfstool_mrc.log 2>&1 || die "Unable to extract MRC file"
     if ! check_file_sha1 "${MRC_FILENAME}" "${MRC_SHA1}" 1 ; then
         die "MRC file hash does not match the expected one"
     fi
     log "Extracting Intel Broadwell Reference Code : ${REFCODE_FILENAME}"
-    ${CBFSTOOL} $coreboot_filename extract  -r BOOT_STUB -n "fallback/refcode" -f ${REFCODE_FILENAME} -m x86 > ${TEMPDIR}/cbfstool_refcode.log 2>&1 || die "Unable to extract Refcode file"
+    ${CBFSTOOL} $coreboot_filename extract  -r $region -n "fallback/refcode" -f ${REFCODE_FILENAME} -m x86 > ${TEMPDIR}/cbfstool_refcode.log 2>&1 || die "Unable to extract Refcode file"
     if ! check_file_sha1 "${REFCODE_FILENAME}" "${REFCODE_SHA1}" 1 ; then
         die "MRC file hash does not match the expected one"
     fi
@@ -327,7 +331,7 @@ get_mrc_blob() {
 
 get_vgabios_blob() {
     log "Extracting VGA BIOS image : ${VGABIOS_FILENAME}"
-    if [ $VENDOR ]; then
+    if [ "$VENDOR" == "1" ]; then
         ${UEFIEXTRACT} ${ORIG_FILENAME} > ${TEMPDIR}/uefiextract.log 2>&1 || die "Unable to extract vgabios file"
         cp "${ORIG_FILENAME}.dump/2 BIOS region/2 8C8CE578-8A3D-4F1C-9935-896185C32DD3/2 9E21FD93-9C72-4C15-8C4B-E77F1DB2D792/0 EE4E5898-3914-4259-9D6E-DC7BD79403CF/1 Volume image section/0 8C8CE578-8A3D-4F1C-9935-896185C32DD3/237 A0327FE0-1FDA-4E5B-905D-B510C45A61D0/0 EE4E5898-3914-4259-9D6E-DC7BD79403CF/1 C5A4306E-E247-4ECD-A9D8-5B1985D3DCDA/body.bin" ${VGABIOS_FILENAME}
         rm -rf "${ORIG_FILENAME}.dump"
@@ -344,12 +348,16 @@ get_descriptor_and_me_blobs() {
     log "Extracting Intel Firmware Descriptor and Intel Management Engine images"
     ${IFDTOOL} -x ${ORIG_FILENAME} > ${TEMPDIR}/ifdtool_extract.log 2>&1 || die "Unable to extract descriptor and me files"
     rm -f flashregion_1_bios.bin
+    local region_0_size=0
     local region_2_size=0
+    if [ -f ${DESCRIPTOR_FILENAME} ]; then
+        region_0_size=$(stat -c%s "${DESCRIPTOR_FILENAME}")
+    fi
     if [ -f ${ME_FILENAME} ]; then
         region_2_size=$(stat -c%s "${ME_FILENAME}")
     fi
-    if ! check_file_sha1 "${DESCRIPTOR_FILENAME}" "${DESCRIPTOR_SHA1}" 1 ; then
-        die "Intel Firmware Descriptor hash does not match the expected one"
+    if [ "$region_0_size" != "${DESCRIPTOR_SIZE}" ]; then
+        die "Intel Firmware Descriptor size does not match the expected file size"
     fi
     if [ "$region_2_size" != "${ME_SIZE}" ]; then
         die "Intel Management Engine size does not match the expected file size"
@@ -613,8 +621,8 @@ EOF
 }
 
 check_battery() {
-    local capacity=$(cat /sys/class/power_supply/BAT0/capacity)
-    local status=$(cat /sys/class/power_supply/BAT0/status)
+    local capacity=$(cat /sys/class/power_supply/BAT*/capacity)
+    local status=$(cat /sys/class/power_supply/BAT*/status)
     local failed=0
     
 
@@ -635,6 +643,62 @@ check_battery() {
         exit 1
     fi
 }
+
+flashrom_progress() {
+    local current=0
+    local total_bytes=0x800000
+    local percent=0
+    local IN=''
+    local spin='-\|/'
+    local spin_idx=0
+    local progressbar=''
+    local progressbar2=$(for ((i=0; i < 49; i++)) do echo -ne ' ' ; done)
+    local status='init'
+   
+    echo "Initializing internal Flash Programmer"
+    while [ 1 ]; do
+        read -d' ' IN || break
+        current=$(echo "$IN" | egrep -o '0x[0-9a-f]+-0x[0-9a-f]+:.*' | egrep -o "0x[0-9a-f]+" | tail -n 1)
+        if [ "${current}" != "" ]; then
+            percent=$(echo $((100 * (${current} + 1) / ${total_bytes})) )
+            progressbar=$(for ((i=0; i < $(($percent/2)); i++)) do echo -ne '#' ; done)
+            progressbar2=$(for ((i=0; i < $((49 - $percent/2)); i++)) do echo -ne ' ' ; done)
+        fi
+        if [ $percent -eq 100 ]; then
+            spin_idx=4
+        else
+            spin_idx=$(( (spin_idx+1) %4 ))
+        fi
+        if [ "$status" == "init" ]; then
+            if [ "$IN" == "contents..." ]; then
+                status="reading"
+                echo "Reading old flash contents. Please wait..."
+            fi
+        fi
+        if [ "$status" == "reading" ]; then
+            if echo "${IN}" | grep "done." > /dev/null ; then
+                status="writing"
+            fi
+        fi
+        if [ "$status" == "writing" ]; then
+            echo -ne "Flashing : [${progressbar}${spin:$spin_idx:1}${progressbar2}] (${percent}%)\r"
+            if echo "$IN" | grep "Verifying" > /dev/null ; then
+                status="verifying"
+                echo ""
+                echo "Verifying flash contents. Please wait..."
+            fi
+        fi
+        if [ "$status" == "verifying" ]; then
+            if echo "${IN}" | grep "VERIFIED." > /dev/null ; then
+                status="done"
+                echo "The flash contents were verified and image was flashed correctly."
+            fi
+        fi
+    done
+    echo ""
+}
+
+
 flash_coreboot() {
     log ''
     log ''
@@ -648,7 +712,22 @@ flash_coreboot() {
     read
     if [ "${IS_LIBREM13V1}" == "1" ]; then
         log '**** Flashing Coreboot to your BIOS Flash ****'
-        ${FLASHROM} -V ${FLASHROM_PROGRAMMER} ${FLASHROM_ARGS} -w ${COREBOOT_FINAL_IMAGE} >& ${TEMPDIR}/flashrom_write.log || flashing_failure
+        ${FLASHROM} -V ${FLASHROM_PROGRAMMER} ${FLASHROM_ARGS} -w ${COREBOOT_FINAL_IMAGE} 2>&1 | tee ${TEMPDIR}/flashrom_write.log | flashrom_progress
+        if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            log ''
+            log ''
+            log ''
+            tail -n 20 ${TEMPDIR}/flashrom_write.log
+            log ''
+            log ''
+            log ''
+            log 'ERROR: It appears that flashing your BIOS has failed. '
+            log 'This is not good news. We recommend you retry running this script a few times until'
+            log 'it succeeds. Or try to flash back the BIOS using your original BIOS backup file'
+            log "which is available in the file '${ORIG_FILENAME}' "
+            echo "Log files are available in '${TEMPDIR}'"
+            exit 1
+        fi
     fi
     
     log 'Congratulations! you now have coreboot installed on your machine'
