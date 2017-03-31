@@ -121,10 +121,10 @@ check_machine() {
                              "${PRODUCT_NAME}" == "SharkBay Platform" -a \
                              "${VERSION}" == "0.1" ]; then
         FLASHROM_ARGS=""
-        ORIG_FILENAME="vendor_bios_backup.rom"
+        ORIG_FILENAME="factory_bios_backup.rom"
         VENDOR=1
         IS_LIBREM13V1=1
-        log "Vendor BIOS has been detected in your flash"
+        log '**** Factory BIOS has been detected in your flash ****'
     elif [ "${MANUFACTURER}" == "Purism" -a \
                              "${PRODUCT_NAME}" == "Librem 13" -a \
                              "${VERSION}" == "1.0" ]; then
@@ -139,7 +139,7 @@ check_machine() {
             log 'You have enabled the --test-on-non-librem option, so this script will continue but will not'
             log 'attempt to access your flash.'
             FLASHROM_ARGS=""
-            ORIG_FILENAME="vendor_bios_backup.rom"
+            ORIG_FILENAME="factory_bios_backup.rom"
             VENDOR=1
             IS_LIBREM13V1=0
         else
@@ -151,15 +151,30 @@ check_machine() {
 backup_original_rom() {
     log "Making backup copy of your current BIOS. Please wait..."
     if [ "${IS_LIBREM13V1}" == "1" ]; then
+        if [ -f "${ORIG_FILENAME}" ]; then
+            log ""
+            log "ERROR: File ${ORIG_FILENAME} already exists."
+            log "We don't want to overwrite this file because it might contain a valid BIOS image."
+            log "For example, if you just flashed coreboot but didn't reboot your laptop, then this script"
+            log "will recognize that you are still running the factory BIOS, and that file"
+            log "contains the original factory BIOS file, but reading the flash contents now would simply"
+            log "overwrite it with the coreboot image you have just flashed, thus destroying your only copy"
+            log "of the original Factory BIOS file."
+            log ""
+            log "For your security, this update process is cancelled."
+            log "Please move away that file into a safe location before running this script again."
+            die ""
+        fi
         ${FLASHROM} -V ${FLASHROM_PROGRAMMER} ${FLASHROM_ARGS} -r ${ORIG_FILENAME} >& ${TEMPDIR}/flashrom_read.log || die "Unable to dump original BIOS from your flash"
     else
         if ! check_file_sha1 "${ORIG_FILENAME}" "1860c3e14f700dd060d974ea2612271eaa4307da" 1 ; then
-            log 'This is not a Librem 13 machine, so a Vendor bios will be downloaded for testing purposes'
+            log 'This is not a Librem 13 machine, so a factory bios will be downloaded for testing purposes'
             curl -s "http://kakaroto.homelinux.net/vendor_bios_backup.rom.bz2" > ${ORIG_FILENAME}.bz2
-            rm -f ${ORIG_FILENAME}
-            bunzip2 ${ORIG_FILENAME}.bz2
+            rm -f vendor_bios_backup.rom
+            bunzip2 vendor_bios_backup.rom.bz2
+            mv vendor_bios_backup.rom ${ORIG_FILENAME}
             if ! check_file_sha1 "${ORIG_FILENAME}" "1860c3e14f700dd060d974ea2612271eaa4307da" 1 ; then
-                die "Vendor BIOS hash does not match the expected one"
+                die "Factory BIOS hash does not match the expected one"
             fi
         fi
     fi
@@ -300,7 +315,7 @@ get_mrc_blob() {
     local region="COREBOOT"
 
     if [ "$VENDOR" == "1" ]; then
-        log '**** The original vendor BIOS has been detected.                    ****'
+        log '**** The original Factory BIOS has been detected.                    ****'
         log '**** Since this is the first time you will be upgrading to coreboot ****'
         log '**** You will need to download some of the required binary blobs.   ****'
         log '**** These binary blobs will need to be extracted from the recovery ****'
@@ -641,6 +656,12 @@ check_battery() {
         log "flash when your laptop is plugged in to the power supply and"
         log "the battery is sufficiently charged (25% minimum)."
         exit 1
+    else
+        log ""
+        log "Your laptop is currently connected to the power supply, and your"
+        log "battery is at ${capacity}% of capacity."
+        log "We recommend that you do not disconnect the laptop from the power supply"
+        log "in order to avoid any potential accidental shutdowns."
     fi
 }
 
