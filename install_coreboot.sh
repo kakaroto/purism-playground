@@ -606,6 +606,7 @@ apply_config_options() {
 
     log '**** Applying configuration options ****'
     if [ "$intel_me" == "1" ]; then
+        log '**** Neutralizing the Intel Management Engine using me_cleaner ****'
         ${ME_CLEANER} ${COREBOOT_FINAL_IMAGE} > ${TEMPDIR}/me_cleaner.log 2>&1
     fi
     if [ "$microcode" != "1" ]; then
@@ -645,7 +646,7 @@ check_battery() {
     local failed=0
     
 
-    if [ ${status} != "Charging" -a ${status} != "Full" ] ; then
+    if [ ${status} == "Discharging" ] ; then
         log "Please connect your Librem computer to the AC adapter"
         failed=1
     fi
