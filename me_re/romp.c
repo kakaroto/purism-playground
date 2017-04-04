@@ -1,56 +1,55 @@
-// RAPI header
-#define RAPI_BASE_ADDRESS	0x20000000
-#define RAPI_MAGIC		0x49504152 // "RAPI" in ascii
-#define RAPI_VERSION		0x0005
-// RAPI methods
-#define RAPI_UNK_80		(RAPI_BASE_ADDRESS + 0x80)
-#define RAPI_memset_A7C		(RAPI_BASE_ADDRESS + 0xA7C)
-#define RAPI_UNK_CF4		(RAPI_BASE_ADDRESS + 0xCF4)
+#include <rapi.h>
 
-// RAPI values/structs?
-#define RAPI_4E4		(RAPI_BASE_ADDRESS + 0x4E4)
-#define RAPI_504		(RAPI_BASE_ADDRESS + 0x504)
-#define RAPI_51C		(RAPI_BASE_ADDRESS + 0x51C)
-
-#define TO_U32(addr)		*((uint32 *) addr)
-#define TO_U16(addr)		*((uint16 *) addr)
-#define TO_U8(addr)		*((uint8 *) addr)
+// some MMIO addresses ?
 #define FLAG_ADDRESS1		0x8000C038
 #define FLAG_ADDRESS2		0x80008FA0
 #define FLAG_VALUE		TO_U16(FLAG_ADDRESS1)
 
-#define RAM_ADDRESS		0x200d3000
-#define RAM(index)		TO_U32(RAM_ADDRESS + index)
+#define ROMP_RAM_ADDRESS	((void *) 0x200d3000)
+#define ROMP_SCRATCH_AREA	((void *) 0x21000000)
+
+typedef struct {
+  void *romp_address;
+  uint32_t romp_size;
+  MmeHeader_s *bup_module;
+  void * flag_address;
+  uint32_t aux_reg_8011[7]; // Timestamps at various moments in the code?
+} RompData_s;
+
+static const RompData_s *ROMP_DATA = ROMP_RAM_ADDRESS;
+
+static uint32_t *AUX_REGS = NULL; // Auxiliary registers
 
 void validate_RAPI_and_version(int arg1, int arg2) {
-  if (TO_U32(RAPI_BASE_ADDRESS) != RAPI_MAGIC ||
-      TO_U16(RAPI_BASE_ADDRESS + 0xC) != RAPI_VERSION) {
+  if (RAPI_HEADER->magic != RAPI_MAGIC ||
+      RAPI_HEADER->version != RAPI_VERSION) {
     // TODO: figure out what is auxiliary register 0x10005 ?
+    // Probably a status code? 
     AUX_REG[0x10005] = (AUX_REG[0x10005] & 0xFFFF0FFF) | 0x3000;
     while (1) halt(); // Sets the Halt processor control flag.
   } 
 }
 
 void ROMP_start(int arg1, int arg2) {
-  void *module;
-  char *rapi_504_ptr;
+  MmeHeader_s *module;
 
-  RAPI_UNK_CF4(arg1, arg2); // Unknown RAPI, no idea if it uses args
+  RAPI_ac_push_13_to_20(); // Pushes registers 13 to 20. No idea why it's a RAPI, and not inline
+
   // TODO: figure out what is auxiliary register 0x10011 ?
   // Does it matter that the store happens twice ? 
   AUX_REG[0x10011] = (AUX_REG[0x10011] & 0x0FFFFFFF) | 0x80000000; 
   AUX_REG[0x10011] = (AUX_REG[0x10011] & 0xFF00FFFF);
 
-  RAPI_memset_A7C(RAM_ADDRESS, 0, 0x2C);
-  RAM(0x10) = AUX_REG[0x8011];
+  RAPI_memset(&ROMP_DATA, 0, sizeof(ROMP_DATA) /*0x2C*/);
+  ROMP_DATA->aux_reg_8011[0] = AUX_REG[0x8011];
+  
+  module = RAPI_find_module("ROMP", 1, *rapi_ptr_manifest0, 0);
 
-  module = j_rapi_find_module("ROMP", 1, TO_U32(RAPI_4E4), 0);
-
-  RAM(0) = TO_U32(module + 0x34); 
-  RAM(4) = TO_U32(module + 0x44);
+  ROMP_DATA->romp_address = module->load_address;
+  ROMP_DATA->romp_size = module->memory_size;
   AUX_REG[0x10011] = (AUX_REG[0x10011] & 0xFFFFBFFF); // Clear 14th bit
 
-  RAM(0xC) = FLAG_ADDRESS1;
+  ROMP_DATA->flag_address = FLAG_ADDRESS1;
   if ((TO_U32(FLAG_ADDRESS2 + 0x78) & 0x20000) == 0x20000) {
     if ((FLAG_VALUE & 0x400) == 0x400) {
       FLAG_VALUE |= 0x80; // Sets bit 7
@@ -76,61 +75,60 @@ void ROMP_start(int arg1, int arg2) {
   AUX_REG[0x10011] = (AUX_REG[0x10011] & 0xFF00FFFF) | 0x10000;
   
   // if it takes 2 args, then r1 is FLAG_ADDRESS1
-  if (j_check_fpt_header(0x400000) != 0) {
-    void *nftp;
+  if (RAPI_check_fpt_header(FLASH_ME_REGION) != 0) {
+    FTPEntry_s *nftp;
 
-    RAM(0x14) = AUX_REG[0x8011]; // We stored it in 0x10 before, and 0x18 later
-    nfpt = j_find_partition("NFTP", 1, 0x400000, 0);
-    RAM(0x18) = AUX_REG[0x8011]; // We stored it in 0x10 before, and 0x18 later
+    ROMP_DATA->aux_reg_8011[1] = AUX_REG[0x8011]; // We stored it in 0x10 before, and 0x18 later
+    nfpt = RAPI_find_partition("NFTP", 1, FLASH_ME_REGION, 0);
+    ROMP_DATA->aux_reg_8011[2] = AUX_REG[0x8011]; // We stored it in 0x10 before, and 0x18 later
     
     if (nftp != NULL) {
-      void *nftp_data;
+      MeManifestHeader_s *nftp_manifest;
+      MeManifestHeader_s *scratch = (MeManifestHeader_s *) ROMP_SCRATCH_AREA;
 
-      nftp_data = nftp->field_8 + 0x400000;
-      if (TO_U32(nftp_data + 0x1C) == 0x324E4D24) { // "$MN2" tag
-	if (strncmp(nftp_data + 0x284, "FTPR", 4) == 0) {
-	  rom_lock_mem_range(0x21000000, 0x8000, 0x50032, 0);
+      nftp_manifest = FLASH_ME_REGION + nftp->offset;
+      if (nftp_manifest->tag == 0x324E4D24) { // "$MN2" tag
+	if (RAPI_strncmp(nftp_manifest->partition_name, "FTPR", 4) == 0) {
+	  rom_lock_mem_range(ROMP_SCRATCH_AREA, 0x8000, 0x50032, 0);
 	  AUX_REG[0x10011] = (AUX_REG[0x10011] & 0x0FFFFFFF) | 0x80000000; 
 	  AUX_REG[0x10011] = (AUX_REG[0x10011] & 0xFF00FFFF) | 0x20000;
-	  if (j_manifest_checksig(nftp_data, TO_U32(RAPI_51C),
-				  0x21000000, 0x8000) != 0) {
-	    RAM(0x1C) = AUX_REG[0x8011];
+	  if (RAPI_manifest_checksig(nftp_manifest, *rapi_known_keys,
+				     scratch, 0x8000) != 0) {
+	    ROMP_DATA->aux_reg_8011[3] = AUX_REG[0x8011];
 	    AUX_REG[0x10011] = AUX_REG[0x10011] | 0x4000;
 	    
 	    if ((FLAG_VALUE & 0x80) == 0) {
 	      if ((FLAG_VALUE & 0x300) <= 0) {
-		uint32 partition_size = TO_U32(0x21000018);
+		uint32 partition_size = scratch->size;
 		uint32 lut_offset;
-		void *rapi_4e4_ptr = TO_U32(RAPI_4E4);
 		void *module_ptr;
 		void *upper_limit;
-		uint32 numModules;
 
-		mem_lock_mem_range(rapi_4e4_ptr, partition_size, 0x50032, 0);
-		// Does this copy the partition from 0x21000000 into the rapi_4e4_ptr area?
-		// That's because the partition size is TO_U32(0x21000000 + 0x18) and after this
-		// it starts to be calculated using TO_U32(rapi_4e4_ptr + 0x18)
-		unk_20000030(rapi_4e4_ptr, 0x21000000, partition_size << 2);
+		// BUG!!!!! It doesn't shift the partition size by 2 when locking the range
+		// This means that there will be a part of the manifest that will not be
+		// range locked.
+		mem_lock_mem_range(*rapi_ptr_manifest0, partition_size, 0x50032, 0);
+		// This seems to be doing a DMA copy from the scratch area
+		// into the manifest0 address
+		RAPI_20000030(*rapi_ptr_manifest0, scratch, partition_size << 2);
 
 		// Ignore padding to align on 0x40 bytes boundaries
-		lut_offset = ((TO_U32(rapi_4e4_ptr + 0x18) << 2) + 0x3f) & 0xFFFFFFC0;
+		lut_offset = ((*rapi_ptr_manifest0->size << 2) + 0x3f) & 0xFFFFFFC0;
 		// does r1 remain valid after the call to previous function? does setup_spi_for_lut need more than 1 arg?
-		j_setup_spi_for_lut(nftp_data + lut_offset); 
+		j_setup_spi_for_lut(nftp_manifest + lut_offset); 
 
-		numModules = TO_U32(rapi_4e4_ptr + 0x20);
-		upper_limit = rapi_4e4_ptr + 0x290 + (numModules * 60);
-		module_ptr = rapi_4e4_ptr + 0x290;
+		module_ptr = *rapi_ptr_manifest0 + 0x290;
+		upper_limit = module_ptr + (*rapi_ptr_manifest0->num_modules * 0x60);
 		while (module_ptr < upper_limit) {
-		  // Add nftp_data pointer to LUT_OFFSET value
-		  // TODO: need to understand the difference between the data in
-		  // the pointers : nftp_data, rapi_4e4_ptr and 0x210000000
-		  // And why there are so many copies, or do they all point to the same thing
-		  TO_U32(module_ptr + 0x38) += nftp_data;
+		  // Add nftp_manifest pointer to LUT_OFFSET value
+		  // This transforms the LUT_OFFSET value into an actual pointer to the module
+		  // in the flash ME Region
+		  ((MmeHeader_s *) module_ptr)->module += nftp_manifest;
 		}
 	      }
 	    }
 	  }
-	  mem_unlock_mem_range(0x21000000, 0x8000, 2);
+	  mem_unlock_mem_range(ROMP_SCRATCH_AREA, 0x8000, 2);
 	}
       }
     }
@@ -138,17 +136,16 @@ void ROMP_start(int arg1, int arg2) {
   
   // I wonder if it's debug logging the value of 0x8011 in its internal
   // structure at different points in the code?
-  RAM(0x20) = AUX_REG[0x8011];
-  rapi_504_ptr = TO_U32(RAPI_504);
-  if (rapi_504_ptr[10] != 0) {
-    if (rapi_504_ptr[9] > rapi_504_ptr[10]) {
+  ROMP_DATA->aux_reg_8011[4] = AUX_REG[0x8011];
+  if (*rapi_ptr_pavp1->field_a != 0) {
+    if (*rapi_ptr_pavp1->field_9 > *rapi_ptr_pavp1->field_a) {
       if ((FLAG_VALUE & 0x10) != 0) {
-	rapi_504_ptr[9] = rapi_504_ptr[10];
-	rapi_504_ptr[10] = 0;
-	memcpy(rapi_504_ptr + 0x10, 0x20, rapi_504_ptr + 0x30, 0x20);
-	memcpy(rapi_504_ptr + 0x30, 0, 0x20);
-	memcpy(rapi_504_ptr + 0x50, 0, 0x20);
-	dma_start(rapi_504_ptr, 0x194, 0);
+	*rapi_ptr_pavp1->field_9 = *rapi_ptr_pavp1->field_a;
+	*rapi_ptr_pavp1->field_a = 0;
+	RAPI_memcpy(*rapi_ptr_pavp1->field_10, 0x20, *rapi_ptr_pavp1->field_30, 0x20);
+	RAPI_memset(*rapi_ptr_pavp1->field_30, 0, 0x20);
+	RAPI_memset(*rapi_ptr_pavp1->field_50, 0, 0x20);
+	RAPI_dma_start(*rapi_ptr_pavp1, sizeof(PavpData1_s) /*0x194*/, 0);
       }
     }
   }
@@ -156,27 +153,27 @@ void ROMP_start(int arg1, int arg2) {
   AUX_REG[0x10011] = (AUX_REG[0x10011] & 0x0FFFFFFF) | 0x80000000; 
   AUX_REG[0x10011] = (AUX_REG[0x10011] & 0xFF00FFFF) | 0x30000;
   
-  module = j_rapi_find_module("BUP", 1, TO_U32(RAPI_4E4), 0);
-  RAM(0x8) = module;
-  RAM(0x24) = AUX_REG[0x8011];
+  module = RAPI_rapi_find_module("BUP", 1, *rapi_ptr_manifest0, 0);
+  ROMP_DATA->bup_module = module;
+  ROMP_DATA->aux_reg_8011[5] = AUX_REG[0x8011];
   if (module != NULL) {
     // Same  code as at the start of the function, but now we OR with 0x40000
     AUX_REG[0x10011] = (AUX_REG[0x10011] & 0x0FFFFFFF) | 0x80000000; 
     AUX_REG[0x10011] = (AUX_REG[0x10011] & 0xFF00FFFF) | 0x40000;
     if (load_module(module, 0xC0) == 0) {
-      RAM(0x28) = AUX_REG[0x8011];
-      module[0x50] |= 0x1;
+      ROMP_DATA->aux_reg_8011[6] = AUX_REG[0x8011];
+      module->flags |= 0x1;
       // Same  code as at the start of the function, but now we OR with 0x50000
       AUX_REG[0x10011] = (AUX_REG[0x10011] & 0x0FFFFFFF) | 0x80000000; 
       AUX_REG[0x10011] = (AUX_REG[0x10011] & 0xFF00FFFF) | 0x50000;
       // Looks like will start (jump to) the BUP module, giving it ROMP's internal RAM
       // address as argument (which has ROMP's find_module result + 0x34, then + 0x44,
       // the module object of BUP, the address of FLAG_ADDRESS1, then the debug of aux 0x8011.
-      module[0x4C](RAM);
+      module->entry_point(ROMP_DATA);
     }
   }
     
-  go_to_error_state((AUX_REG[0x10005] & 0xFFFF0FFF) | 0x3000, AUX_REG[0x10011]);
+  RAPI_go_to_error_state((AUX_REG[0x10005] & 0xFFFF0FFF) | 0x3000, AUX_REG[0x10011]);
   return;
 }
 
