@@ -61,7 +61,8 @@ class SPIFlash(object):
                 '02': 'Page Program',
                 '90': 'Read Manufacturer/Device ID',
                 '00': '***Unknown***',
-                'AB': 'Release Powerdown/ID'}
+                'AB': 'Release Powerdown/ID',
+                '3B': 'Dual Output Read'}
 
     def __init__(self):
         self.builder = DataBuilder()
@@ -94,6 +95,11 @@ class SPIFlash(object):
                 self.arglen = 4
                 self.reading = True
                 self.dual = True
+            elif self.command == '3B':
+                self.state = self.SENDING_ARGS
+                self.arglen = 3
+                self.dummy = 1
+                self.reading = True
             elif self.command == '9F' or \
                  self.command == '05' or \
                  self.command == '35':
@@ -123,9 +129,11 @@ class SPIFlash(object):
                 self.args.append(DI)
                 self.arglen -= 1
             elif self.dummy > 0:
-                self.dummy -= 0
+                self.dummy -= 1
             if self.arglen == 0 and self.dummy == 0:
                 self.state = self.RECEIVING_DATA
+                if self.command == '3B':
+                    self.dual = True
         elif self.state == self.RECEIVING_DATA:
             if self.reading:
                 self.data.append(DO)
@@ -138,6 +146,7 @@ class SPIFlash(object):
             sinput = ''
             soutput = ''
             prev_clk = 1
+            last_cs_ts = 0
             for row in reader:
                 cs = int(row[' CS'])
                 clk = int(row[' CLK'])
@@ -145,6 +154,7 @@ class SPIFlash(object):
                 miso = int(row[' MISO'])
                 ts = float(row['Time[s]'])
                 if cs == 0:
+                    last_cs_ts = ts
                     if prev_clk == 0 and clk == 1:
                         sinput += str(mosi)
                         soutput += str(miso)
@@ -163,7 +173,7 @@ class SPIFlash(object):
                             sinput = ''
                             soutput = ''
                             self.parse_byte(DI, DO)
-                else:
+                elif (ts - last_cs_ts) > 0.00000001:
                     if len(sinput) > 0:
                         print "Remaining data after CS is 1"
                         print "MOSI: %s" % sinput
@@ -178,7 +188,7 @@ class SPIFlash(object):
                             while len(data):
                                 print " ".join(data[0:8])
                                 data = data[8:]
-                            if self.command == 'BB' or self.command == '03':
+                            if self.command == 'BB' or self.command == '3B' or self.command == '03':
                                 offset = int(''.join(self.args[0:3]), 16)
                                 self.builder.add_data(self.data, offset)
                         if self.command == 'BB' and self.args[3] != '05':
