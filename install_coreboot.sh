@@ -3,8 +3,8 @@
 # Copyright (C) 2017 Purism
 # Author: Youness Alaoui <youness.alaoui@puri.sm>
 #
-# Script that downloads and/or extracts all the required binaries for coreboot
-# to work on Purism Librem 13 v1 laptops and builds the final coreboot flash image
+# Script that downloads and/or extracts all the required components for coreboot
+# to work on Purism Librem 13 v1 laptops, builds the final coreboot flash image,
 # and flashes it.
 
 # Dependencies : curl dmidecode flashrom sharutils
@@ -87,9 +87,9 @@ check_dependency () {
     local cmd=$2
     
     if type $cmd &> ${LOGFILE}; then
-        log "$name : yes"
+        log "$name: yes"
     else
-        log "$name : no"
+        log "$name: no"
         die "Error: Could not find required dependency"
     fi
 }
@@ -136,7 +136,7 @@ check_machine() {
         ORIG_FILENAME="coreboot_bios_backup.rom"
         VENDOR=0
         IS_LIBREM13V1=1
-        log '**** Coreboot BIOS has been detected in your flash **** '
+        log '**** A coreboot BIOS has been detected in your flash **** '
     else
         if [ "$ARGV" == "--test-on-non-librem" ]; then
             log '**** This machine does not seem to be a Purism Librem 13 v1, it is not safe to use this script **** '
@@ -153,7 +153,7 @@ check_machine() {
 }
 
 backup_original_rom() {
-    log "Making backup copy of your current BIOS. Please wait..."
+    log "Making a backup copy of your current BIOS. Please wait..."
     if [ "${IS_LIBREM13V1}" == "1" ]; then
         if [ -f "${ORIG_FILENAME}" ]; then
             log ""
@@ -202,7 +202,7 @@ check_file_sha1 () {
         $print "Verifying hash of file : $file"
         result=$(sha1sum "$file" | cut -d' ' -f 1)
         if [ "$result" == "$sha1" ]; then
-            $print "File hash is valid : $result"
+            $print "File hash is valid: $result"
             return 0
         else
             $print "File hash is invalid. Found $result, expected $sha1"
@@ -222,7 +222,7 @@ get_tidus_recovery_zip () {
         curl ${TIDUS_ZIP_URL} > chromeos_8743.85.0_tidus_recovery_stable-channel_mp-v2.bin.zip
         if ! check_file_sha1 "$file" "$sha1" 1 ; then
             log "The downloaded image failed to match the expected file hash."
-            die "Aborting the operation to prevent corruption of your BIOS"
+            die "Aborting the operation to prevent corruption of your BIOS."
         fi
     fi
 }
@@ -268,7 +268,7 @@ get_tidus_partition () {
 
         if ! check_file_sha1 "$file" "$sha1" ; then
             log "The extracted partition failed to match the expected file hash."
-            die "Aborting the operation to prevent corruption of your BIOS"
+            die "Aborting the operation to prevent corruption of your BIOS."
         fi
         rm -f ${TIDUS_BIN_FILENAME}
     fi
@@ -296,7 +296,7 @@ get_tidus_coreboot () {
     local file=${TIDUS_COREBOOT_FILENAME}
     local sha1=${TIDUS_COREBOOT_SHA1}
     if check_file_sha1 "$file" "$sha1" ; then
-        log "Tidus Chromebook Coreboot image already extracted"
+        log "Tidus Chromebook coreboot image already extracted"
     else
         get_tidus_shellball
 	local _unpacked=$( mktemp -d )
@@ -314,20 +314,20 @@ get_tidus_coreboot () {
     fi        
 }
 
-get_mrc_blob() {
+get_mrc_binary() {
     local coreboot_filename=""
     local region="COREBOOT"
 
     if [ "$VENDOR" == "1" ]; then
-        log '**** The original Factory BIOS has been detected.                    ****'
+        log '**** The original Factory BIOS has been detected.                   ****'
         log '**** Since this is the first time you will be upgrading to coreboot ****'
-        log '**** You will need to download some of the required binary blobs.   ****'
-        log '**** These binary blobs will need to be extracted from the recovery ****'
+        log '**** You will need to download some of the required binaries.       ****'
+        log '**** These binaries will need to be extracted from the recovery     ****'
         log '**** image of the Tidus chromebook (Lenovo ThinkCentre ChromeBox).  ****'
-        log '**** Since those binary are required for the hardware and memory    ****'
+        log '**** Since those binaries are required for the hardware and memory  ****'
         log '**** initialization of the machine, but cannot be distributed       ****'
-        log '**** without agreeing to draconian licenses, you will download them ****'
-        log '**** directly from the Google website                               ****'
+        log '**** without agreeing to draconian licenses, this script downloads  ****'
+        log '**** them directly from the Google website.                         ****'
 
         get_tidus_coreboot
         coreboot_filename=${TIDUS_COREBOOT_FILENAME}
@@ -336,20 +336,20 @@ get_mrc_blob() {
         coreboot_filename=${ORIG_FILENAME}
     fi
 
-    log "Extracting Memory Reference Code : ${MRC_FILENAME}"
+    log "Extracting Memory Reference Code: ${MRC_FILENAME}"
     ${CBFSTOOL} $coreboot_filename extract  -r $region -n "mrc.bin" -f ${MRC_FILENAME} > ${TEMPDIR}/cbfstool_mrc.log 2>&1 || die "Unable to extract MRC file"
     if ! check_file_sha1 "${MRC_FILENAME}" "${MRC_SHA1}" 1 ; then
         die "MRC file hash does not match the expected one"
     fi
-    log "Extracting Intel Broadwell Reference Code : ${REFCODE_FILENAME}"
+    log "Extracting Intel Broadwell Reference Code: ${REFCODE_FILENAME}"
     ${CBFSTOOL} $coreboot_filename extract  -r $region -n "fallback/refcode" -f ${REFCODE_FILENAME} -m x86 > ${TEMPDIR}/cbfstool_refcode.log 2>&1 || die "Unable to extract Refcode file"
     if ! check_file_sha1 "${REFCODE_FILENAME}" "${REFCODE_SHA1}" 1 ; then
         die "MRC file hash does not match the expected one"
     fi
 }
 
-get_vgabios_blob() {
-    log "Extracting VGA BIOS image : ${VGABIOS_FILENAME}"
+get_vgabios_binary() {
+    log "Extracting VGA BIOS image: ${VGABIOS_FILENAME}"
     if [ "$VENDOR" == "1" ]; then
         ${UEFIEXTRACT} ${ORIG_FILENAME} > ${TEMPDIR}/uefiextract.log 2>&1 || die "Unable to extract vgabios file"
         cp "${ORIG_FILENAME}.dump/2 BIOS region/2 8C8CE578-8A3D-4F1C-9935-896185C32DD3/2 9E21FD93-9C72-4C15-8C4B-E77F1DB2D792/0 EE4E5898-3914-4259-9D6E-DC7BD79403CF/1 Volume image section/0 8C8CE578-8A3D-4F1C-9935-896185C32DD3/237 A0327FE0-1FDA-4E5B-905D-B510C45A61D0/0 EE4E5898-3914-4259-9D6E-DC7BD79403CF/1 C5A4306E-E247-4ECD-A9D8-5B1985D3DCDA/body.bin" ${VGABIOS_FILENAME}
@@ -360,10 +360,10 @@ get_vgabios_blob() {
     if ! check_file_sha1 "${VGABIOS_FILENAME}" "${VGABIOS_SHA1}" 1 ; then
         die "VGA Bios file hash does not match the expected one"
     fi
-    log "VGA BIOS blob has been extracted from your current BIOS."
+    log "The VGA BIOS binary has been extracted from your current BIOS."
 }
 
-get_descriptor_and_me_blobs() {
+get_descriptor_and_me_binaries() {
     log "Extracting Intel Firmware Descriptor and Intel Management Engine images"
     ${IFDTOOL} -x ${ORIG_FILENAME} > ${TEMPDIR}/ifdtool_extract.log 2>&1 || die "Unable to extract descriptor and me files"
     rm -f flashregion_1_bios.bin
@@ -383,11 +383,11 @@ get_descriptor_and_me_blobs() {
     fi
 }
 
-get_required_blobs() {
-    get_mrc_blob
-    get_vgabios_blob
-    get_descriptor_and_me_blobs
-    log '**** Binary blobs have been extracted from your current BIOS and (optionally) from the recovery image of the Tidus chromebook. ****'
+get_required_binaries() {
+    get_mrc_binary
+    get_vgabios_binary
+    get_descriptor_and_me_binaries
+    log '**** Binaries have been extracted from your current BIOS and (optionally) from the recovery image of the Tidus chromebook. ****'
 }
 
 default_config_options() {
@@ -401,21 +401,21 @@ default_config_options() {
 
 configuration_wizard() {
     clear
-    echo "Select which coreboot options you would like :"
-    echo "1 - With a neutured Intel ME binary (93% code removed) (recommended)"
-    echo "2 - With the full Intel Management Engine (ME) binary"
+    echo "Select which coreboot options you would like:"
+    echo "1 - With a neutralized Intel ME binary (93% code removed) - recommended"
+    echo "2 - With the full Intel ME binary"
     echo ""
-    echo "** DISCLAIMER: The Intel Management Engine is the firmware running"
+    echo "** NOTE: The Intel Management Engine (ME) is the firmware running"
     echo "** on a hidden microcontroller in the CPU which allows remote access"
     echo "** and control to the computer and its hardware. While the remote"
     echo "** capabilities (AMT) of the Intel ME are already disabled on the Librem computers,"
-    echo "** the firmware is still considered an unknown binary blob with code that"
+    echo "** the firmware is still considered an unknown binary with code that"
     echo "** cannot be audited and which runs on your machine without restrictions."
     echo ""
-    echo "** For more information, please visit : https://puri.sm/learn/intel-me/"
+    echo "** For more information, please visit: https://puri.sm/learn/intel-me/"
     intel_me=0
     while [ "$intel_me" != "1" -a "$intel_me" != "2" ]; do
-        read -p "Enter your choice (default: 1) : " intel_me
+        read -p "Enter your choice (default: 1): " intel_me
         if [ "$intel_me" == "" ]; then
             intel_me=1
         fi
@@ -425,21 +425,21 @@ configuration_wizard() {
     done
 
     clear
-    echo "Select which coreboot options you would like :"
-    echo "1 - With CPU microcode updates (RECOMMENDED)"
+    echo "Select which coreboot options you would like:"
+    echo "1 - With CPU microcode updates (recommended)"
     echo "2 - Without CPU microcode updates"
     echo ""
     echo "** WARNING: Running your BIOS without the CPU microcode updates is not recommended."
-    echo "** The microcode updates are used to fix bugs in the CPU's instructions"
-    echo "** which can cause random crashes, data corruption and other unexpected"
-    echo "** behavior."
-    echo "** The risk level of the microcode updates is low, and running without them can"
-    echo "** cause silent data corruption or random lock-ups of the hardware"
+    echo "** The microcode updates are used to fix bugs in the CPU's instructions which can"
+    echo "** otherwise cause random crashes, data corruption and other unexpected behavior."
+    echo "** "
+    echo "** The risk level of the microcode updates is low, and running without them"
+    echo "** can cause silent data corruption or random hardware lock-ups (freezes)."
     echo "** Please note that the CPU already comes with a microcode installed in its"
     echo "** silicon. This option only affects the inclusion of updates to it."
     microcode=0
     while [ "$microcode" != "1" -a "$microcode" != "2" ]; do
-        read -p "Enter your choice (default: 1) : " microcode
+        read -p "Enter your choice (default: 1): " microcode
         if [ "$microcode" == "" ]; then
             microcode=1
         fi
@@ -449,7 +449,7 @@ configuration_wizard() {
     done
     
     clear
-    echo "Select which coreboot options you would like :"
+    echo "Select which coreboot options you would like:"
     echo "1 - Run the VGA BIOS natively (recommended)"
     echo "2 - Run the VGA BIOS in a CPU emulator"
     echo ""
@@ -460,7 +460,7 @@ configuration_wizard() {
     echo "** time, as the CPU emulator is significantly slower than a native run."
     vbios_emulator=0
     while [ "$vbios_emulator" != "1" -a "$vbios_emulator" != "2" ]; do
-        read -p "Enter your choice (default: 1) : " vbios_emulator
+        read -p "Enter your choice (default: 1): " vbios_emulator
         if [ "$vbios_emulator" == "" ]; then
             vbios_emulator=1
         fi
@@ -470,15 +470,15 @@ configuration_wizard() {
     done
 
     clear
-    echo "Select which SeaBIOS options you would like :"
-    echo "1 - Boot order : M.2 SSD -> 2.5\" HDD"
-    echo "2 - Boot order : 2.5\" HDD-> M.2 SSD"
+    echo "Select the default order in which devices will attempt booting:"
+    echo "1 - Boot order: M.2 SSD disk first, 2.5\" SATA disk second"
+    echo "2 - Boot order: 2.5\" SATA disk first, M.2 SSD second"
     echo ""
-    echo "** Please select the default boot order. You can always select a"
-    echo "** different boot device by pressing 'ESC' at boot time"
+    echo "** Note: regardless of the option chosen above, you can always select"
+    echo "** a different boot device by pressing 'ESC' at boot time."
     bootorder=0
     while [ "$bootorder" != "1" -a "$bootorder" != "2" ]; do
-        read -p "Enter your choice (default: 1) : " bootorder
+        read -p "Enter your choice (default: 1): " bootorder
         if [ "$bootorder" == "" ]; then
             bootorder=1
         fi
@@ -488,16 +488,16 @@ configuration_wizard() {
     done
     
     clear
-    echo "Select whether to include Memtest86+ in the Boot options : "
+    echo "Select whether to include Memtest86+ in the Boot menu choices: "
     echo "1 - Include Memtest86+ as a boot option"
     echo "2 - Do not include Memtest86+ as a boot option"
     echo ""
     echo "** Adding Memtest86+ as a boot option means that when pressing ESC"
     echo "** at boot time, you will have a 'memtest' option to boot into"
-    echo "** regardless of the content of your hard drives"
+    echo "** regardless of the content of your hard drives."
     memtest=0
     while [ "$memtest" != "1" -a "$memtest" != "2" ]; do
-        read -p "Enter your choice (default: 1) : " memtest
+        read -p "Enter your choice (default: 1): " memtest
         if [ "$memtest" == "" ]; then
             memtest=1
         fi
@@ -510,13 +510,13 @@ configuration_wizard() {
     delay=-1
     while [ "$delay" -lt "0" ]; do
         echo "Please select the amount of time (in milliseconds) to wait at the"
-        read -p "boot menu prompt before selecting the default boot choice (default: 2500) : " delay
+        read -p "boot menu prompt before selecting the default boot choice (default: 2500): " delay
         if [ "$delay" == "" ]; then
             delay=2500
         fi
         case $delay in
             ''|*[!0-9]*) 
-                echo "Invalid choice : Not a positive number"
+                echo "Invalid choice: Not a positive number"
                 delay=-1
                 ;;
             *) ;;
@@ -524,33 +524,33 @@ configuration_wizard() {
     done
     
     clear
-    log "Summary of your choices :"
+    log "Summary of your choices:"
     if [ "$intel_me" == "1" ]; then
-        log "Intel ME                : Neutered"
+        log "Intel ME               : Neutralized"
     else
-        log "Intel ME                : Full"
+        log "Intel ME               : Full"
     fi
     if [ "$microcode" == "1" ]; then
-        log "Microcode updates       : Enabled"
+        log "Microcode updates      : Enabled"
     else
-        log "Microcode updates       : Disabled"
+        log "Microcode updates      : Disabled"
     fi
     if [ "$vbios_emulator" == "1" ]; then
-        log "VGA BIOS Execution mode : Native"
+        log "VGA BIOS Execution mode: Native"
     else
-        log "VGA BIOS Execution mode : Secured"
+        log "VGA BIOS Execution mode: Secured"
     fi
     if [ "$bootorder" == "1" ]; then
-        log "Boot order              : M.2 SSD -> 2.5\" HDD"
+        log "Boot order             : M.2 SSD first, 2.5\" SATA second"
     else
-        log "Boot order              : 2.5\" HDD -> M.2 SSD"
+        log "Boot order             : 2.5\" SATA first, M.2 SSD second"
     fi
     if [ "$memtest" == "1" ]; then
-        log "Memtest86+              : Included"
+        log "Memtest86+             : Included"
     else
-        log "Memtest86+              : Not included"
+        log "Memtest86+             : Not included"
     fi
-    log "Boot menu wait time     : ${delay} ms"
+    log "Boot menu wait time        : ${delay} ms"
     log ""
 }
 
@@ -564,19 +564,19 @@ get_librem13v1_coreboot () {
         sha1=${COREBOOT_SECURE_SHA1}
     fi
     if ! check_file_sha1 "${COREBOOT_FILENAME}" "$sha1" 1 ; then
-        log '**** Downloading Coreboot BIOS image ****'
+        log '**** Downloading coreboot BIOS image ****'
         curl $url > ${COREBOOT_BZ2_FILENAME}
         rm -f ${COREBOOT_FILENAME}
-        log '**** Decompressing Coreboot BIOS image ****'
+        log '**** Decompressing coreboot BIOS image ****'
         bunzip2 ${COREBOOT_BZ2_FILENAME}
     fi
     if ! check_file_sha1 "${COREBOOT_FILENAME}" "$sha1" 1 ; then
-        die "Coreboot image hash does not match the expected one"
+        die "The coreboot image hash does not match the expected one."
     fi
 }
 
 build_flash_image() {
-    log '**** Building Coreboot Flash Image ****'
+    log '**** Building coreboot Flash Image ****'
     dd if=/dev/zero bs=8388608 count=1 2> /dev/null | tr '\000' '\377' > ${COREBOOT_FINAL_IMAGE}
     dd if=${DESCRIPTOR_FILENAME} of=${COREBOOT_FINAL_IMAGE} conv=notrunc > ${TEMPDIR}/dd_descriptor.log 2>&1
     ${IFDTOOL} -i ME:${ME_FILENAME} ${COREBOOT_FINAL_IMAGE} > ${TEMPDIR}/ifdtool_inject_me.log 2>&1
@@ -645,19 +645,18 @@ check_battery() {
     fi
     if [ ${capacity} -lt 25 ]; then
         log "Please charge your battery to at least 25% (currently ${capacity}%)"
-        log "then retry updating your coreboot installation"
         failed=1
     fi
     if [ $failed == "1" ]; then
         log ""
-        log "To prevent accidental shutdowns, we recommend to only update your"
-        log "flash when your laptop is plugged in to the power supply and"
-        log "the battery is sufficiently charged (25% minimum)."
+        log "To prevent accidental shutdowns, we recommend to only run this script when"
+        log "your laptop is plugged in to the power supply AND"
+        log "the battery is present and sufficiently charged (over 25%)."
         exit 1
     else
         log ""
-        log "Your laptop is currently connected to the power supply, and your"
-        log "battery is at ${capacity}% of capacity."
+        log "Your laptop is currently connected to the power supply, "
+        log "and your battery is at ${capacity}% of capacity."
         log "We recommend that you do not disconnect the laptop from the power supply"
         log "in order to avoid any potential accidental shutdowns."
     fi
@@ -700,7 +699,7 @@ flashrom_progress() {
             fi
         fi
         if [ "$status" == "writing" ]; then
-            echo -ne "Flashing : [${progressbar}${spin:$spin_idx:1}${progressbar2}] (${percent}%)\r"
+            echo -ne "Flashing: [${progressbar}${spin:$spin_idx:1}${progressbar2}] (${percent}%)\r"
             if echo "$IN" | grep "Verifying" > /dev/null ; then
                 status="verifying"
                 echo ""
@@ -710,7 +709,7 @@ flashrom_progress() {
         if [ "$status" == "verifying" ]; then
             if echo "${IN}" | grep "VERIFIED." > /dev/null ; then
                 status="done"
-                echo "The flash contents were verified and image was flashed correctly."
+                echo "The flash contents were verified and the image was flashed correctly."
             fi
         fi
     done
@@ -721,16 +720,16 @@ flashrom_progress() {
 flash_coreboot() {
     log ''
     log ''
-    log 'Your coreboot image is now ready! We will now flash your BIOS with coreboot.'
+    log 'Your coreboot image is now ready. We can now flash your BIOS with coreboot.'
     log ''
     log 'WARNING: Make sure not to power off your computer or interrupt this process in any way!'
-    log 'Interrupting this process could result in irreparable damage to your computer'
-    log 'and you may not be able to boot it afterwards (brick)'
+    log 'Interrupting this process may result in irreparable damage to your computer'
+    log 'and you may not be able to boot it afterwards (it would be a "brick").'
     log ''
-    log 'Press Enter to start the flashing process'
+    log 'Press Enter to start the flashing process.'
     read
     if [ "${IS_LIBREM13V1}" == "1" ]; then
-        log '**** Flashing Coreboot to your BIOS Flash ****'
+        log '**** Flashing coreboot to your BIOS Flash ****'
         ${FLASHROM} -V ${FLASHROM_PROGRAMMER} ${FLASHROM_ARGS} -w ${COREBOOT_FINAL_IMAGE} 2>&1 | tee ${TEMPDIR}/flashrom_write.log | flashrom_progress
         if [ ${PIPESTATUS[0]} -ne 0 ]; then
             log ''
@@ -741,17 +740,17 @@ flash_coreboot() {
             log ''
             log ''
             log 'ERROR: It appears that flashing your BIOS has failed. '
-            log 'This is not good news. We recommend you retry running this script a few times until'
-            log 'it succeeds. Or try to flash back the BIOS using your original BIOS backup file'
+            log 'Do NOT power off or restart your computer. Try running this script again until'
+            log 'it succeeds, or try to flash back the BIOS using your original BIOS backup file'
             log "which is available in the file '${ORIG_FILENAME}' "
             echo "Log files are available in '${TEMPDIR}'"
             exit 1
         fi
     fi
     
-    log 'Congratulations! you now have coreboot installed on your machine'
-    log 'All you need to do is to reboot your computer and enjoy your computer'
-    log 'with a little bit more freedom in it'
+    log 'Congratulations! You now have coreboot installed on your machine'
+    log 'You can now reboot your computer and enjoy increased security and freedom.'
+    log 'Keep an eye on https://puri.sm/news/ for any potential future coreboot updates.'
     log ''
     echo "Log files are available in '${TEMPDIR}'"
 }
@@ -761,7 +760,7 @@ check_dependencies
 check_machine
 check_battery
 backup_original_rom
-get_required_blobs
+get_required_binaries
 default_config_options
 log "Press Enter to start the configuration wizard for coreboot"
 read
