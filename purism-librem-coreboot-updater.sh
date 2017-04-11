@@ -10,18 +10,24 @@
 # Dependencies : curl dmidecode flashrom sharutils
 
 ARGV=$1
-TEMPDIR=$(mktemp -d /tmp/coreboot_install.XXXXXX)
+CACHE_HOME="${XDG_CACHE_HOME}"
+if [ "$CACHE_HOME" == "" ]; then
+    CACHE_HOME="${HOME}/.cache"
+fi
+CACHE_DIR="${CACHE_HOME}/purism-librem-coreboot-updater"
+mkdir -p "${CACHE_DIR}"
+TEMPDIR=$(mktemp -d ${CACHE_DIR}/logs.XXXXXX)
 LOGFILE="${TEMPDIR}/install.log"
 
-FLASHROM='../flashrom/flashrom'
-FLASHROM_PROGRAMMER="-pinternal:laptop=force_I_want_a_brick"
 DMIDECODE='dmidecode'
-CBFSTOOL='../coreboot/util/cbfstool/cbfstool'
-RMODTOOL='../coreboot/util/cbfstool/rmodtool'
-IFDTOOL='../coreboot/util/ifdtool/ifdtool'
-UEFIEXTRACT='../UEFITool/UEFIExtract/UEFIExtract'
-ME_CLEANER='../coreboot/util/me_cleaner/me_cleaner.py'
+FLASHROM="flashrom"
+CBFSTOOL="/usr/share/purism-librem-coreboot-updater/cbfstool"
+RMODTOOL="/usr/share/purism-librem-coreboot-updater/rmodtool"
+IFDTOOL="/usr/share/purism-librem-coreboot-updater/ifdtool"
+UEFIEXTRACT="/usr/share/purism-librem-coreboot-updater/UEFIExtract"
+ME_CLEANER="/usr/share/purism-librem-coreboot-updater/me_cleaner.py"
 
+FLASHROM_PROGRAMMER="-pinternal:laptop=force_I_want_a_brick"
 TIDUS_ZIP_FILENAME='chromeos_8743.85.0_tidus_recovery_stable-channel_mp-v2.bin.zip'
 TIDUS_ZIP_URL='https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_8743.85.0_tidus_recovery_stable-channel_mp-v2.bin.zip'
 TIDUS_ZIP_SHA1='d17650df79235dca0b13c86748e63c227e03c401'
@@ -47,12 +53,10 @@ DESCRIPTOR_SHA1='359101061f789e1cfc13742d5980ac441787e96c'
 DESCRIPTOR_SHA1_CB='c4c00c68a56203b311e73d13be7fbc63d2e7b5af'
 ME_FILENAME='flashregion_2_intel_me.bin'
 ME_SIZE='2093056'
-COREBOOT_FILENAME='coreboot_bios.rom'
-COREBOOT_BZ2_FILENAME='coreboot_bios.rom.bz2'
-COREBOOT_NATIVE_URL='http://kakaroto.homelinux.net/coreboot_native_bios.rom.bz2'
-COREBOOT_NATIVE_SHA1='e8bc66ee875bac7c0f31dd424bdce89b361b4315'
-COREBOOT_SECURE_URL='http://kakaroto.homelinux.net/coreboot_secure_bios.rom.bz2'
-COREBOOT_SECURE_SHA1='573d7a920fe5bf3768d69902da06db0688b6ecfa'
+COREBOOT_FILENAME='coreboot_base_bios.rom'
+COREBOOT_BZ2_FILENAME='coreboot_base_bios.rom.bz2'
+COREBOOT_BASE_URL='http://kakaroto.homelinux.net/coreboot_base_bios.rom.bz2'
+COREBOOT_BASE_SHA1='951496c5e91e7e757ae17b068b000edb48d695b3'
 
 COREBOOT_FINAL_IMAGE='coreboot.rom'
 
@@ -76,6 +80,25 @@ die () {
     exit 1
 }
 
+welcome_msg() {
+    clear
+    log "Welcome to the Purism Librem Coreboot Updater"
+    log ""
+    log "This script will help you build a coreboot image and will update your BIOS"
+    log "with the latest coreboot image for your machine."
+    log ""
+    log "This script currently only supports installing coreboot on Librem 13 v1 hardware"
+    log ""
+    log '**** NOTE: After flashing, this script will reboot your laptop ****'
+    log "It is recommended not to postpone rebooting after coreboot has been installed"
+    log "on your flash."
+    log "We suggest you save all your documents and close all your applications"
+    log "to prepare your computer for the reboot"
+    log ""
+    log "Press Enter to begin..."
+    read
+}
+
 check_root() {
     if [[ "$EUID" != 0 ]]; then
         die "This script must be run as root."
@@ -96,19 +119,21 @@ check_dependency () {
 
 check_dependencies () {
     log "Checking for dependencies :"
-    check_dependency flashrom ${FLASHROM}
-    check_dependency dmidecode ${DMIDECODE}
-    check_dependency cbfstool ${CBFSTOOL}
-    check_dependency ifdtool ${IFDTOOL}
-    check_dependency UEFIExtract ${UEFIEXTRACT}
-    check_dependency me_cleaner ${ME_CLEANER}
-    check_dependency curl curl
-    check_dependency bunzip2 bunzip2
-    check_dependency unzip unzip
-    check_dependency parted parted
-    check_dependency dd dd
-    check_dependency debugfs debugfs
-    check_dependency uudecode uudecode
+    check_dependency "flashrom     " ${FLASHROM}
+    check_dependency "dmidecode    " ${DMIDECODE}
+    check_dependency "cbfstool     " ${CBFSTOOL}
+    check_dependency "rmodtool     " ${RMODTOOL}
+    check_dependency "ifdtool      " ${IFDTOOL}
+    check_dependency "UEFIExtract  " ${UEFIEXTRACT}
+    check_dependency "me_cleaner   " ${ME_CLEANER}
+    check_dependency "curl         " curl
+    check_dependency "bunzip2      " bunzip2
+    check_dependency "unzip        " unzip
+    check_dependency "parted       " parted
+    check_dependency "dd           " dd
+    check_dependency "debugfs      " debugfs
+    check_dependency "uudecode     " uudecode
+    log ""
 }
 
 check_machine() {
@@ -128,7 +153,8 @@ check_machine() {
         ORIG_FILENAME="factory_bios_backup.rom"
         VENDOR=1
         IS_LIBREM13V1=1
-        log '**** Factory BIOS has been detected in your flash ****'
+        CACHE_DIR="${CACHE_HOME}/purism-librem-coreboot-updater/librem13v1"
+        log '**** Detected Librem 13 v1 hardware with the Factory BIOS in the flash ****'
     elif [ "${MANUFACTURER}" == "Purism" -a \
                              "${PRODUCT_NAME}" == "Librem 13" -a \
                              "${VERSION}" == "1.0" ]; then
@@ -136,54 +162,35 @@ check_machine() {
         ORIG_FILENAME="coreboot_bios_backup.rom"
         VENDOR=0
         IS_LIBREM13V1=1
-        log '**** A coreboot BIOS has been detected in your flash **** '
+        CACHE_DIR="${CACHE_HOME}/purism-librem-coreboot-updater/librem13v1"
+        log '**** Detected Librem 13 v1 hardware with a coreboot BIOS in the flash **** '
     else
-        if [ "$ARGV" == "--test-on-non-librem" ]; then
-            log '**** This machine does not seem to be a Purism Librem 13 v1, it is not safe to use this script **** '
-            log 'You have enabled the --test-on-non-librem option, so this script will continue but will not'
-            log 'attempt to access your flash.'
-            FLASHROM_ARGS=""
-            ORIG_FILENAME="factory_bios_backup.rom"
-            VENDOR=1
-            IS_LIBREM13V1=0
-        else
-            die '**** This machine does not seem to be a Purism Librem 13 v1, it is not safe to use this script **** '
-        fi
+        die '**** This machine does not seem to be a Purism Librem 13 v1, it is not safe to use this script **** '
     fi
+    mkdir -p "${CACHE_DIR}"
+    cd "${CACHE_DIR}"
 }
 
 backup_original_rom() {
     log "Making a backup copy of your current BIOS. Please wait..."
-    if [ "${IS_LIBREM13V1}" == "1" ]; then
-        if [ -f "${ORIG_FILENAME}" ]; then
-            log ""
-            log "ERROR: File ${ORIG_FILENAME} already exists."
-            log "We don't want to overwrite this file because it might contain a valid BIOS image."
-            log "For example, if you just flashed coreboot but didn't reboot your laptop, then this script"
-            log "will recognize that you are still running the factory BIOS, and that file"
-            log "contains the original factory BIOS file, but reading the flash contents now would simply"
-            log "overwrite it with the coreboot image you have just flashed, thus destroying your only copy"
-            log "of the original Factory BIOS file."
-            log ""
-            log "For your security, this update process is cancelled."
-            log "Please move away that file into a safe location before running this script again."
-            die ""
-        fi
-        ${FLASHROM} -V ${FLASHROM_PROGRAMMER} ${FLASHROM_ARGS} -r ${ORIG_FILENAME} >& ${TEMPDIR}/flashrom_read.log || die "Unable to dump original BIOS from your flash"
-    else
-        if ! check_file_sha1 "${ORIG_FILENAME}" "1860c3e14f700dd060d974ea2612271eaa4307da" 1 ; then
-            log 'This is not a Librem 13 machine, so a factory bios will be downloaded for testing purposes'
-            curl -s "http://kakaroto.homelinux.net/vendor_bios_backup.rom.bz2" > ${ORIG_FILENAME}.bz2
-            rm -f vendor_bios_backup.rom
-            bunzip2 vendor_bios_backup.rom.bz2
-            mv vendor_bios_backup.rom ${ORIG_FILENAME}
-            if ! check_file_sha1 "${ORIG_FILENAME}" "1860c3e14f700dd060d974ea2612271eaa4307da" 1 ; then
-                die "Factory BIOS hash does not match the expected one"
-            fi
-        fi
+    if [ -f "${ORIG_FILENAME}" ]; then
+        log ""
+        log "ERROR: File '${CACHE_DIR}/${ORIG_FILENAME}' already exists."
+        log "We don't want to overwrite this file because it might contain a valid BIOS image."
+        log "For example, if you just flashed coreboot but didn't reboot your laptop, then this script"
+        log "will recognize that you are still running the factory BIOS, and that file"
+        log "contains the original factory BIOS file, but reading the flash contents now would simply"
+        log "overwrite it with the coreboot image you have just flashed, thus destroying your only copy"
+        log "of the original Factory BIOS file."
+        log ""
+        log "For your security, this update process is cancelled."
+        log "Please move away that file into a safe location before running this script again."
+        die ""
     fi
+    ${FLASHROM} -V ${FLASHROM_PROGRAMMER} ${FLASHROM_ARGS} -r ${ORIG_FILENAME} >& ${TEMPDIR}/flashrom_read.log || die "Unable to dump original BIOS from your flash"
     
     log "Your current BIOS has been backed up to the file '${ORIG_FILENAME}'"
+    log ""
 }
 
 check_file_sha1 () {
@@ -217,9 +224,9 @@ get_tidus_recovery_zip () {
     if check_file_sha1 "$file" "$sha1" ; then
         log "Tidus Chromebook recovery image found. Skipping download."
     else
-        log "Press Enter to start the 553MB download."
+        log "Press Enter to start the 606MB download."
         read
-        curl ${TIDUS_ZIP_URL} > chromeos_8743.85.0_tidus_recovery_stable-channel_mp-v2.bin.zip
+        curl ${TIDUS_ZIP_URL} > $file
         if ! check_file_sha1 "$file" "$sha1" 1 ; then
             log "The downloaded image failed to match the expected file hash."
             die "Aborting the operation to prevent corruption of your BIOS."
@@ -234,7 +241,7 @@ get_tidus_recovery () {
         log "Tidus Chromebook recovery image already extracted"
     else
         get_tidus_recovery_zip
-        log '**** Decompressing the image ****'
+        log 'Decompressing the image...'
         unzip -q ${TIDUS_ZIP_FILENAME}
         if ! check_file_sha1 "$file" "$sha1" 1 ; then
             log "The downloaded image failed to match the expected file hash."
@@ -281,7 +288,7 @@ get_tidus_shellball () {
         log "Tidus Chromebook Firmware update Shell script already extracted"
     else
         get_tidus_partition
-	log '**** Extracting chromeos-firmwareupdate ****'
+	log 'Extracting chromeos-firmwareupdate'
 	printf "cd /usr/sbin\ndump chromeos-firmwareupdate ${TIDUS_SHELLBALL_FILENAME}\nquit" | \
 		debugfs ${TIDUS_ROOTA_FILENAME} > ${TEMPDIR}/debugfs.log 2>&1
         if ! check_file_sha1 "$file" "$sha1" 1 ; then
@@ -301,7 +308,7 @@ get_tidus_coreboot () {
         get_tidus_shellball
 	local _unpacked=$( mktemp -d )
         
-	log '**** Extracting coreboot image ****'
+	log 'Extracting coreboot image'
 	sh ${TIDUS_SHELLBALL_FILENAME} --sb_extract $_unpacked &> ${TEMPDIR}/shellball.log
 	cp $_unpacked/bios.bin ${TIDUS_COREBOOT_FILENAME}
         rm -rf "$_unpacked"
@@ -378,6 +385,15 @@ get_descriptor_and_me_binaries() {
     if [ "$region_0_size" != "${DESCRIPTOR_SIZE}" ]; then
         die "Intel Firmware Descriptor size does not match the expected file size"
     fi
+    if [ "$VENDOR" == "1" ]; then
+        if ! check_file_sha1 "${DESCRIPTOR_FILENAME}" "${DESCRIPTOR_SHA1}" 1 ; then
+            die "Intel Firmware Descriptor file hash does not match the expected one"
+        fi
+    else
+        if ! check_file_sha1 "${DESCRIPTOR_FILENAME}" "${DESCRIPTOR_SHA1_CB}" 1 ; then
+            die "Intel Firmware Descriptor file hash does not match the expected one"
+        fi
+    fi
     if [ "$region_2_size" != "${ME_SIZE}" ]; then
         die "Intel Management Engine size does not match the expected file size"
     fi
@@ -387,13 +403,17 @@ get_required_binaries() {
     get_mrc_binary
     get_vgabios_binary
     get_descriptor_and_me_binaries
-    log '**** Binaries have been extracted from your current BIOS and (optionally) from the recovery image of the Tidus chromebook. ****'
+    log ""
+    log "All required binaries have been extracted from your current BIOS"
+    if [ "$VENDOR" == "1" ]; then
+        log "and from the recovery image of the Tidus chromebook."
+    fi
+    log ""
 }
 
 default_config_options() {
     intel_me=1
     microcode=1
-    vbios_emulator=1
     bootorder=1
     memtest=1
     delay=2500
@@ -447,28 +467,7 @@ configuration_wizard() {
             echo "Invalid choice"
         fi
     done
-    
-    clear
-    echo "Select which coreboot options you would like:"
-    echo "1 - Run the VGA BIOS natively (recommended)"
-    echo "2 - Run the VGA BIOS in a CPU emulator"
-    echo ""
-    echo "** DISCLAIMER: The VGA BIOS is used to initialize the graphics card."
-    echo "** If you are worried about it potentialy being used to install hypervisors"
-    echo "** or other malicious modules, then you can run it in a CPU emulator which"
-    echo "** eliminates the potential security risks but greatly increases the boot"
-    echo "** time, as the CPU emulator is significantly slower than a native run."
-    vbios_emulator=0
-    while [ "$vbios_emulator" != "1" -a "$vbios_emulator" != "2" ]; do
-        read -p "Enter your choice (default: 1): " vbios_emulator
-        if [ "$vbios_emulator" == "" ]; then
-            vbios_emulator=1
-        fi
-        if [ "$vbios_emulator" != "1" -a "$vbios_emulator" != "2" ]; then
-            echo "Invalid choice"
-        fi
-    done
-
+   
     clear
     echo "Select the default order in which devices will attempt booting:"
     echo "1 - Boot order: M.2 SSD disk first, 2.5\" SATA disk second"
@@ -535,11 +534,6 @@ configuration_wizard() {
     else
         log "Microcode updates      : Disabled"
     fi
-    if [ "$vbios_emulator" == "1" ]; then
-        log "VGA BIOS Execution mode: Native"
-    else
-        log "VGA BIOS Execution mode: Secured"
-    fi
     if [ "$bootorder" == "1" ]; then
         log "Boot order             : M.2 SSD first, 2.5\" SATA second"
     else
@@ -550,33 +544,26 @@ configuration_wizard() {
     else
         log "Memtest86+             : Not included"
     fi
-    log "Boot menu wait time        : ${delay} ms"
+    log "Boot menu wait time    : ${delay} ms"
     log ""
 }
 
 get_librem13v1_coreboot () {
     local sha1=''
-    if [ "$vbios_emulator" == "1" ]; then
-        url=${COREBOOT_NATIVE_URL}
-        sha1=${COREBOOT_NATIVE_SHA1}
-    else
-        url=${COREBOOT_SECURE_URL}
-        sha1=${COREBOOT_SECURE_SHA1}
-    fi
-    if ! check_file_sha1 "${COREBOOT_FILENAME}" "$sha1" 1 ; then
-        log '**** Downloading coreboot BIOS image ****'
-        curl $url > ${COREBOOT_BZ2_FILENAME}
+    if ! check_file_sha1 "${COREBOOT_FILENAME}" "${COREBOOT_BASE_SHA1}" 1 ; then
+        log 'Downloading coreboot BIOS image'
+        curl ${COREBOOT_BASE_URL} > ${COREBOOT_BZ2_FILENAME}
         rm -f ${COREBOOT_FILENAME}
-        log '**** Decompressing coreboot BIOS image ****'
+        log 'Decompressing coreboot BIOS image'
         bunzip2 ${COREBOOT_BZ2_FILENAME}
     fi
-    if ! check_file_sha1 "${COREBOOT_FILENAME}" "$sha1" 1 ; then
+    if ! check_file_sha1 "${COREBOOT_FILENAME}" "${COREBOOT_BASE_SHA1}" 1 ; then
         die "The coreboot image hash does not match the expected one."
     fi
 }
 
 build_flash_image() {
-    log '**** Building coreboot Flash Image ****'
+    log 'Building coreboot Flash Image...'
     dd if=/dev/zero bs=8388608 count=1 2> /dev/null | tr '\000' '\377' > ${COREBOOT_FINAL_IMAGE}
     dd if=${DESCRIPTOR_FILENAME} of=${COREBOOT_FINAL_IMAGE} conv=notrunc > ${TEMPDIR}/dd_descriptor.log 2>&1
     ${IFDTOOL} -i ME:${ME_FILENAME} ${COREBOOT_FINAL_IMAGE} > ${TEMPDIR}/ifdtool_inject_me.log 2>&1
@@ -597,16 +584,16 @@ build_cbfs_image() {
 }
 
 apply_config_options() {
-    log '**** Applying configuration options ****'
+    log 'Applying configuration options'
     if [ "$intel_me" == "1" ]; then
-        log '**** Neutralizing the Intel Management Engine using me_cleaner ****'
+        log 'Neutralizing the Intel Management Engine using me_cleaner'
         ${ME_CLEANER} ${COREBOOT_FINAL_IMAGE} > ${TEMPDIR}/me_cleaner.log 2>&1
     fi
     if [ "$microcode" != "1" ]; then
-        log '**** Removing microcode updates from the generated coreboot image ****'
+        log 'Removing microcode updates from the generated coreboot image'
         ${CBFSTOOL} ${COREBOOT_FINAL_IMAGE} remove -n cpu_microcode_blob.bin > ${TEMPDIR}/cbfstool_microcode.log 2>&1
     fi
-    log '**** Setting boot order and delay ****'
+    log 'Setting boot order and delay'
     if [ "$bootorder" == "1" ]; then
         cat > bootorder.txt <<EOF
 /pci@i0cf8/*@1f,2/drive@3/disk@0
@@ -626,7 +613,7 @@ EOF
     rm -f bootorder.txt
 
     if [ "$memtest" != "1" ]; then
-        log '**** Removing MemTest86+ from the generated coreboot image ****'
+        log 'Removing MemTest86+ from the generated coreboot image'
         ${CBFSTOOL} ${COREBOOT_FINAL_IMAGE} remove -n img/memtest > ${TEMPDIR}/cbfstool_remove_memtest.log 2>&1
     fi
     log ""
@@ -634,16 +621,16 @@ EOF
 }
 
 check_battery() {
-    local capacity=$(cat /sys/class/power_supply/BAT*/capacity)
-    local status=$(cat /sys/class/power_supply/BAT*/status)
+    local capacity=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null || echo -ne "0")
+    local online=$(cat /sys/class/power_supply/AC/online 2>/dev/null || cat /sys/class/power_supply/ADP*/online 2>/dev/null || echo -ne "0")
     local failed=0
     
 
-    if [ ${status} == "Discharging" ] ; then
+    if [ "${online}" == "0" ] ; then
         log "Please connect your Librem computer to the AC adapter"
         failed=1
     fi
-    if [ ${capacity} -lt 25 ]; then
+    if [ "${capacity}" -lt 25 ]; then
         log "Please charge your battery to at least 25% (currently ${capacity}%)"
         failed=1
     fi
@@ -659,6 +646,7 @@ check_battery() {
         log "and your battery is at ${capacity}% of capacity."
         log "We recommend that you do not disconnect the laptop from the power supply"
         log "in order to avoid any potential accidental shutdowns."
+        log ""
     fi
 }
 
@@ -718,6 +706,7 @@ flashrom_progress() {
 
 
 flash_coreboot() {
+    local answer='no'
     log ''
     log ''
     log 'Your coreboot image is now ready. We can now flash your BIOS with coreboot.'
@@ -726,8 +715,11 @@ flash_coreboot() {
     log 'Interrupting this process may result in irreparable damage to your computer'
     log 'and you may not be able to boot it afterwards (it would be a "brick").'
     log ''
-    log 'Press Enter to start the flashing process.'
-    read
+    while [ "$answer" != "yes" ]; do
+        log "Please make a copy of the files in '${CACHE_DIR}' to a safe location outside of this computer."
+        echo -ne "Please type 'yes' to start the flashing process, followed by the reboot : "
+        read answer
+    done
     if [ "${IS_LIBREM13V1}" == "1" ]; then
         log '**** Flashing coreboot to your BIOS Flash ****'
         ${FLASHROM} -V ${FLASHROM_PROGRAMMER} ${FLASHROM_ARGS} -w ${COREBOOT_FINAL_IMAGE} 2>&1 | tee ${TEMPDIR}/flashrom_write.log | flashrom_progress
@@ -742,7 +734,7 @@ flash_coreboot() {
             log 'ERROR: It appears that flashing your BIOS has failed. '
             log 'Do NOT power off or restart your computer. Try running this script again until'
             log 'it succeeds, or try to flash back the BIOS using your original BIOS backup file'
-            log "which is available in the file '${ORIG_FILENAME}' "
+            log "which is available in the file '${CACHE_DIR}/${ORIG_FILENAME}' "
             echo "Log files are available in '${TEMPDIR}'"
             exit 1
         fi
@@ -753,8 +745,16 @@ flash_coreboot() {
     log 'Keep an eye on https://puri.sm/news/ for any potential future coreboot updates.'
     log ''
     echo "Log files are available in '${TEMPDIR}'"
+    echo ''
+    local sec=10
+    while [ $sec -gt 0 ]; do
+        echo -ne "Your computer will reboot in : $sec seconds    \r"
+        sleep 1
+        sec=$(($sec -1))
+    done
 }
 
+welcome_msg
 check_root
 check_dependencies
 check_machine
@@ -771,3 +771,4 @@ build_cbfs_image
 apply_config_options
 check_battery
 flash_coreboot
+reboot
