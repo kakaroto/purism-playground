@@ -8,10 +8,20 @@ class DataBuilder(object):
     def __init__(self):
         self.data = []
 
-    def add_data(self, data, offset):
-        padding = offset - len(self.data)
+    def replace_data(self, data, offset):
+        padding = offset + len(data) - len(self.data)
         if padding > 0:
             self.data.extend([None] * padding)
+        self.data[offset:offset+len(data)] = data
+        
+    def add_data(self, data, offset):
+        padding = offset + len(data) - len(self.data)
+        if padding > 0:
+            self.data.extend([None] * padding)
+        for i in xrange(len(data)):
+            if self.data[offset+i] is not None and \
+               self.data[offset+i] != data[i]:
+                print >> sys.stderr, "Data mismatch at offset %X : %s != %s" % (offset+i, self.data[offset+i], data[i])
         self.data[offset:offset+len(data)] = data
 
     def stats(self):
@@ -62,7 +72,9 @@ class SPIFlash(object):
                 '90': 'Read Manufacturer/Device ID',
                 '00': '***Unknown***',
                 'AB': 'Release Powerdown/ID',
-                '3B': 'Dual Output Read'}
+                '3B': 'Dual Output Read',
+                '20': 'Sector Erase',
+                '0B': 'Fast Read data'}
 
     def __init__(self):
         self.builder = DataBuilder()
@@ -121,6 +133,15 @@ class SPIFlash(object):
                 self.state = self.SENDING_ARGS
                 self.dummy = 3
                 self.reading = True
+            elif self.command == '20':
+                self.state = self.SENDING_ARGS
+                self.arglen = 3
+                self.reading = False
+            elif self.command == '0B':
+                self.state = self.SENDING_ARGS
+                self.arglen = 3
+                self.dummy = 1
+                self.reading = True
             else:
                 print "Unknown command received : %s" % self.command
                 sys.exit(-1)
@@ -178,7 +199,7 @@ class SPIFlash(object):
                         print "Remaining data after CS is 1"
                         print "MOSI: %s" % sinput
                         print "MISO : %s" % soutput
-                        break
+                        #break
                     if self.command != '':
                         print "%.4f Command : %s (%s)" % (ts, self.COMMANDS[self.command], self.command)
                         if len(self.args) > 0:
@@ -188,12 +209,18 @@ class SPIFlash(object):
                             while len(data):
                                 print " ".join(data[0:8])
                                 data = data[8:]
-                            if self.command == 'BB' or self.command == '3B' or self.command == '03':
+                            if self.command == 'BB' or self.command == '3B' or self.command == '03' or self.command == '0B':
                                 offset = int(''.join(self.args[0:3]), 16)
                                 self.builder.add_data(self.data, offset)
+                            elif self.command == '02':
+                                offset = int(''.join(self.args[0:3]), 16)
+                                self.builder.replace_data(self.data , offset)
                         if self.command == 'BB' and self.args[3] != '05':
                             print "continuation not 0"
                             break
+                        if self.command == '20':
+                            offset = int(''.join(self.args[0:3]), 16)
+                            self.builder.replace_data(['FF'] * 4096 , offset)
                     sinput = ''
                     soutput = ''
                     self.command = ''
