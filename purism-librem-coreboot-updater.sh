@@ -127,8 +127,14 @@ check_dependencies () {
     check_dependency "UEFIExtract  " ${UEFIEXTRACT}
     check_dependency "me_cleaner   " ${ME_CLEANER}
     check_dependency "curl         " curl
-    check_dependency "bunzip2      " bunzip2
+    check_dependency "grep         " grep
+    check_dependency "sed          " sed
+    check_dependency "cut          " cut
+    check_dependency "head         " head
+    check_dependency "tail         " tail
     check_dependency "unzip        " unzip
+    check_dependency "gunzip       " gunzip
+    check_dependency "bunzip2      " bunzip2
     check_dependency "parted       " parted
     check_dependency "dd           " dd
     check_dependency "debugfs      " debugfs
@@ -299,6 +305,20 @@ get_tidus_shellball () {
     fi
 }
 
+# This will search for and extract the packed bios.bin from the shellball so
+# we can extract the bios.bin without actually executing the chromebook shellball
+# in case it does anything that it shouldn't
+extract_bios_from_shellball () {
+    shellball=$1
+    bios=$2
+
+    start=$(grep "== bios.bin ==" $shellball -n -m 1 | cut -d: -f1)
+    begin=$(tail $shellball -n +${start} | grep 'begin' -n -m 1 | cut -d: -f1)
+    end=$(tail $shellball -n +$(( ${start} + ${begin} - 1)) | grep 'end' -n -m 1 | cut -d: -f1)
+
+    tail $shellball -n +$(( ${start} + ${begin} - 1)) | head -n ${end} | sed 's/^X//' | sed "s#_fwupdate/gzi#${bios}.gz#" | uudecode && gunzip ${bios}.gz && chmod 0644 $bios
+}
+
 get_tidus_coreboot () {
     local file=${TIDUS_COREBOOT_FILENAME}
     local sha1=${TIDUS_COREBOOT_SHA1}
@@ -306,12 +326,9 @@ get_tidus_coreboot () {
         log "Tidus Chromebook coreboot image already extracted"
     else
         get_tidus_shellball
-	local _unpacked=$( mktemp -d )
         
 	log 'Extracting coreboot image'
-	sh ${TIDUS_SHELLBALL_FILENAME} --sb_extract $_unpacked &> ${TEMPDIR}/shellball.log
-	cp $_unpacked/bios.bin ${TIDUS_COREBOOT_FILENAME}
-        rm -rf "$_unpacked"
+        extract_bios_from_shellball ${TIDUS_SHELLBALL_FILENAME} $file
         
         if ! check_file_sha1 "$file" "$sha1" 1 ; then
             log "The coreboot image failed to match the expected file hash."
