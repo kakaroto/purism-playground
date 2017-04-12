@@ -56,7 +56,7 @@ ME_SIZE='2093056'
 COREBOOT_FILENAME='coreboot_base_bios.rom'
 COREBOOT_BZ2_FILENAME='coreboot_base_bios.rom.bz2'
 COREBOOT_BASE_URL='http://kakaroto.homelinux.net/coreboot_base_bios.rom.bz2'
-COREBOOT_BASE_SHA1='951496c5e91e7e757ae17b068b000edb48d695b3'
+COREBOOT_BASE_SHA1='e1673cdfbeb9b44801781b5aa43ea869b2496ddc'
 
 COREBOOT_FINAL_IMAGE='coreboot.rom'
 
