@@ -89,7 +89,7 @@ void ROMP_start(int arg1, int arg2) {
       nftp_manifest = FLASH_ME_REGION + nftp->offset;
       if (nftp_manifest->tag == 0x324E4D24) { // "$MN2" tag
 	if (RAPI_strncmp(nftp_manifest->partition_name, "FTPR", 4) == 0) {
-	  rom_lock_mem_range(ROMP_SCRATCH_AREA, 0x8000, 0x50032, 0);
+	  RAPI_lock_mem_range(ROMP_SCRATCH_AREA, 0x8000, 0x50032, 0);
 	  AUX_REG[0x10011] = (AUX_REG[0x10011] & 0x0FFFFFFF) | 0x80000000; 
 	  AUX_REG[0x10011] = (AUX_REG[0x10011] & 0xFF00FFFF) | 0x20000;
 	  if (RAPI_manifest_checksig(nftp_manifest, *rapi_known_keys,
@@ -107,7 +107,7 @@ void ROMP_start(int arg1, int arg2) {
 		// BUG!!!!! It doesn't shift the partition size by 2 when locking the range
 		// This means that there will be a part of the manifest that will not be
 		// range locked.
-		mem_lock_mem_range(*rapi_ptr_manifest0, partition_size, 0x50032, 0);
+		RAPI_lock_mem_range(*rapi_ptr_manifest0, partition_size, 0x50032, 0);
 		// This seems to be doing a DMA copy from the scratch area
 		// into the manifest0 address
 		RAPI_20000030(*rapi_ptr_manifest0, scratch, partition_size << 2);
@@ -128,7 +128,7 @@ void ROMP_start(int arg1, int arg2) {
 	      }
 	    }
 	  }
-	  mem_unlock_mem_range(ROMP_SCRATCH_AREA, 0x8000, 2);
+	  RAPI_unlock_mem_range(ROMP_SCRATCH_AREA, 0x8000, 2);
 	}
       }
     }

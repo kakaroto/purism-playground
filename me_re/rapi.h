@@ -149,3 +149,5 @@ FPTEntry_t *(*RAPI_find_partition) (const char *module_name, uint32_t arg,
 				  FPTHeader_s *fpt, uint32_t arg2) = (RAPI_BASE_ADDRESS + 0x68);
 uint32_t (*RAPI_manifest_checksig) (MeManifestHeader_s *input, KeyHashes_s *,
 				    MeManifestHeader_s *output, uint32_t flag) = (RAPI_BASE_ADDRESS + 0x88);
+int (*RAPI_lock_mem_range) (void *address, uint32_t size, uint32_t flags, uint32_t zero) = (RAPI_BASE_ADDRESS + 0xA0);
+int (*RAPI_unlock_mem_range) (void *address, uint32_t size, uint32_t flags) = (RAPI_BASE_ADDRESS + 0xA8);
